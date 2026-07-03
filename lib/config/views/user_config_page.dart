@@ -31,10 +31,14 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
   final _formKey = GlobalKey<FormState>();
   final _fdcUserController = TextEditingController();
   final _fdcPassController = TextEditingController();
+  final _timeoutController = TextEditingController(text: '30000');
 
   bool _loading = true;
   bool _saving = false;
   bool _obscurePass = true;
+  String _automationFramework = 'playwright';
+  String _browserMode = 'visible';
+  String _browserEngine = 'chromium';
   String? _error;
   String? _success;
   UserConfig? _config;
@@ -49,15 +53,11 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
   void dispose() {
     _fdcUserController.dispose();
     _fdcPassController.dispose();
+    _timeoutController.dispose();
     super.dispose();
   }
 
   Future<void> _loadConfig() async {
-    final session = AuthScope.of(context);
-    final token = session.token;
-
-    if (token == null) return;
-
     setState(() {
       _loading = true;
       _error = null;
@@ -65,14 +65,15 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
     });
 
     try {
-      final config = await _api.getMyConfig(
-        backendBaseUrl: session.backendBaseUrl,
-        token: token,
-      );
+      final config = await _api.getMyConfig();
 
       if (!mounted) return;
       _fdcUserController.text = config.fdcUser;
       _fdcPassController.text = config.fdcPass;
+      _timeoutController.text = config.actionTimeoutMs.toString();
+      _automationFramework = config.automationFramework;
+      _browserMode = config.browserMode;
+      _browserEngine = config.browserEngine;
       setState(() => _config = config);
     } catch (error) {
       if (!mounted) return;
@@ -88,10 +89,7 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
     if (_formKey.currentState?.validate() != true) return;
 
     final session = AuthScope.of(context);
-    final token = session.token;
     final user = session.user;
-
-    if (token == null || user == null) return;
 
     setState(() {
       _saving = true;
@@ -101,13 +99,15 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
 
     try {
       final saved = await _api.saveMyConfig(
-        backendBaseUrl: session.backendBaseUrl,
-        token: token,
         config: UserConfig(
           id: _config?.id,
-          userId: user.id,
+          userId: user?.id ?? _config?.userId ?? 0,
           fdcUser: _fdcUserController.text.trim(),
           fdcPass: _fdcPassController.text,
+          automationFramework: _automationFramework,
+          browserMode: _browserMode,
+          browserEngine: _browserEngine,
+          actionTimeoutMs: int.parse(_timeoutController.text.trim()),
         ),
       );
 
@@ -216,6 +216,112 @@ class _UserConfigPanelState extends State<UserConfigPanel> {
                     ),
                     validator: (value) =>
                         (value ?? '').isEmpty ? 'Informe a senha FDC.' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Auto clique',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(_automationFramework),
+                    initialValue: _automationFramework,
+                    decoration: const InputDecoration(
+                      labelText: 'Framework',
+                      prefixIcon: Icon(Icons.code_outlined, size: 18),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'playwright',
+                        child: Text('Playwright'),
+                      ),
+                    ],
+                    onChanged: _loading || _saving
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _automationFramework = value);
+                          },
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(_browserMode),
+                    initialValue: _browserMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Como abrir o navegador',
+                      prefixIcon: Icon(Icons.open_in_browser, size: 18),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'visible',
+                        child: Text('Abrir janela visivel'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'background',
+                        child: Text('Rodar em background'),
+                      ),
+                    ],
+                    onChanged: _loading || _saving
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _browserMode = value);
+                          },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey(_browserEngine),
+                          initialValue: _browserEngine,
+                          decoration: const InputDecoration(
+                            labelText: 'Navegador',
+                            prefixIcon: Icon(Icons.public_outlined, size: 18),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'chromium',
+                              child: Text('Chromium'),
+                            ),
+                          ],
+                          onChanged: _loading || _saving
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  setState(() => _browserEngine = value);
+                                },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _timeoutController,
+                          enabled: !_loading && !_saving,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: const InputDecoration(
+                            labelText: 'Timeout ms',
+                            prefixIcon: Icon(Icons.timer_outlined, size: 18),
+                          ),
+                          validator: (value) {
+                            final timeout = int.tryParse((value ?? '').trim());
+
+                            if (timeout == null) {
+                              return 'Informe um numero.';
+                            }
+
+                            if (timeout < 5000 || timeout > 120000) {
+                              return 'Use 5000 a 120000.';
+                            }
+
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 10),

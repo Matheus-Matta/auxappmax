@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_routes.dart';
 import '../../auth/services/auth_session.dart';
+import '../../config/services/user_config_api.dart';
 import '../models/scrape_request.dart';
 import '../models/scrape_result.dart';
 import '../presenters/scraper_presenter.dart';
@@ -15,17 +16,17 @@ class ScraperPage extends StatefulWidget {
 }
 
 class _ScraperPageState extends State<ScraperPage> implements ScraperView {
-  final _backendController = TextEditingController(
-    text: 'http://localhost:3333',
-  );
   final _urlController = TextEditingController(text: 'https://example.com');
   final _clickController = TextEditingController();
   final _extractController = TextEditingController(text: 'body');
   final _waitController = TextEditingController();
+  final _configApi = const UserConfigApi();
 
   late final ScraperPresenter _presenter;
 
   bool _headless = false;
+  bool _configLoaded = false;
+  int _timeoutMs = 30000;
   bool _loading = false;
   String _status = 'Pronto para executar.';
   String _result = '';
@@ -40,17 +41,17 @@ class _ScraperPageState extends State<ScraperPage> implements ScraperView {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final session = AuthScope.of(context);
+    if (_configLoaded) return;
 
-    if (_backendController.text == 'http://localhost:3333') {
-      _backendController.text = session.backendBaseUrl;
-    }
+    _configLoaded = true;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadAutomationConfig(),
+    );
   }
 
   @override
   void dispose() {
     _presenter.detach();
-    _backendController.dispose();
     _urlController.dispose();
     _clickController.dispose();
     _extractController.dispose();
@@ -72,7 +73,7 @@ class _ScraperPageState extends State<ScraperPage> implements ScraperView {
     if (!mounted) return;
 
     setState(() {
-      _status = 'Executando automacao no backend...';
+      _status = 'Executando automacao local...';
       _result = '';
     });
   }
@@ -92,31 +93,39 @@ class _ScraperPageState extends State<ScraperPage> implements ScraperView {
     if (!mounted) return;
 
     setState(() {
-      _status = 'Erro ao chamar o backend.';
+      _status = 'Erro ao executar automacao local.';
       _result = error.toString();
     });
   }
 
   Future<void> _runScrape() {
-    final session = AuthScope.of(context);
-    final token = session.token;
-
-    if (token == null) {
-      showScrapeError('Sessao expirada. Entre novamente.');
-      return Future.value();
-    }
-
     return _presenter.runScrape(
-      backendBaseUrl: _backendController.text.trim(),
-      token: token,
       request: ScrapeRequest(
         url: _urlController.text.trim(),
         clickSelector: _clickController.text.trim(),
         extractSelector: _extractController.text.trim(),
         waitForSelector: _waitController.text.trim(),
         headless: _headless,
+        timeoutMs: _timeoutMs,
       ),
     );
+  }
+
+  Future<void> _loadAutomationConfig() async {
+    try {
+      final config = await _configApi.getMyConfig();
+
+      if (!mounted) return;
+      setState(() {
+        _headless = config.runInBackground;
+        _timeoutMs = config.actionTimeoutMs;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'Usando configuracao local padrao.';
+      });
+    }
   }
 
   @override
@@ -162,20 +171,10 @@ class _ScraperPageState extends State<ScraperPage> implements ScraperView {
               spacing: 12,
               children: [
                 SizedBox(
-                  width: 320,
-                  child: TextField(
-                    controller: _backendController,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Backend',
-                    ),
-                  ),
-                ),
-                SizedBox(
                   width: 180,
                   child: SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Headless'),
+                    title: const Text('Background'),
                     value: _headless,
                     onChanged: _loading
                         ? null
@@ -253,7 +252,7 @@ class _ScraperPageState extends State<ScraperPage> implements ScraperView {
                   padding: const EdgeInsets.all(16),
                   child: SelectableText(
                     _result.isEmpty
-                        ? 'O retorno do backend aparece aqui.'
+                        ? 'O retorno da automacao local aparece aqui.'
                         : _result,
                     style: const TextStyle(fontFamily: 'Consolas'),
                   ),

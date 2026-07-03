@@ -1,10 +1,14 @@
 import { Router } from 'express';
 
-import { executableActionSchema } from './executable.model.js';
+import {
+  executableActionSchema,
+  executableRunResultSchema,
+} from './executable.model.js';
 import {
   presentActionResult,
   presentActions,
   presentDashboard,
+  presentRuns,
   presentValidationFailure,
 } from './executable.presenter.js';
 
@@ -27,6 +31,16 @@ export function createExecutableRoutes({
     const actions = await executableService.listActions();
 
     return res.json(presentActions(actions));
+  });
+
+  router.get('/executions', authMiddleware, requireOperator, async (req, res) => {
+    const result = await executableService.listRuns({
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    const response = presentRuns(result);
+
+    return res.status(response.status).json(response.body);
   });
 
   router.post('/executables', authMiddleware, requireAdmin, async (req, res) => {
@@ -53,6 +67,27 @@ export function createExecutableRoutes({
     requireOperator,
     async (req, res) => {
       const result = await executableService.executeAction(req.params.key, req.user);
+      const response = presentActionResult(result);
+
+      return res.status(response.status).json(response.body);
+    },
+  );
+
+  router.post(
+    '/executables/:key/runs',
+    authMiddleware,
+    requireOperator,
+    async (req, res) => {
+      const parsed = executableRunResultSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json(presentValidationFailure(parsed.error));
+      }
+
+      const result = await executableService.recordClientRun(
+        req.params.key,
+        parsed.data,
+      );
       const response = presentActionResult(result);
 
       return res.status(response.status).json(response.body);

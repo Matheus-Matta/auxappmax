@@ -26,15 +26,20 @@ export class FdcLoginWorkflow {
 
           currentUrl = await actions.open(url, { timeoutMs });
           await actions.waitForVisible('form[name="form1"], form#well');
-          await actions.fillFirst('input[name="USUARIO"]', fdcUser.toLowerCase());
+          await actions.fillFirst(
+            'input[name="USUARIO"]',
+            fdcUser.toLowerCase(),
+          );
           await actions.fillFirst('input[name="PASS"]', fdcPass);
-          await actions.clickFirst('input[type="submit"][value="Acessar sistema"]', {
-            timeoutMs,
-          });
+          await actions.clickFirst(
+            'input[type="submit"][value="Acessar sistema"]',
+            { timeoutMs },
+          );
           await page
-            .waitForURL((nextUrl) => !nextUrl.href.includes('/fdcmarket/index.php'), {
-              timeout: Math.min(timeoutMs, 5000),
-            })
+            .waitForURL(
+              (nextUrl) => !nextUrl.href.includes('/fdcmarket/index.php'),
+              { timeout: Math.min(timeoutMs, 5000) },
+            )
             .catch(() => {});
           await page
             .waitForLoadState('domcontentloaded', {

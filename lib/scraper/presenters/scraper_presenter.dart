@@ -23,21 +23,13 @@ class ScraperPresenter {
     _view = null;
   }
 
-  Future<void> runScrape({
-    required String backendBaseUrl,
-    required String token,
-    required ScrapeRequest request,
-  }) async {
+  Future<void> runScrape({required ScrapeRequest request}) async {
     _view
       ?..setLoading(true)
       ..showScrapeStarted();
 
     try {
-      final result = await _api.runScrape(
-        backendBaseUrl: backendBaseUrl,
-        token: token,
-        request: request,
-      );
+      final result = await _api.runScrape(request: request);
       _view?.showScrapeResult(result);
     } catch (error) {
       _view?.showScrapeError(error);

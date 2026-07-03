@@ -32,6 +32,37 @@ export function presentActions(actions) {
   };
 }
 
+export function presentRuns(result) {
+  if (!result.ok) {
+    return {
+      status: result.status ?? 400,
+      body: { ok: false, error: result.error },
+    };
+  }
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      runs: result.runs.map((run) => ({
+        id: Number(run.id),
+        key: run.key,
+        title: run.title,
+        success: Boolean(run.success),
+        message: run.message ?? '',
+        result: run.result ?? {},
+        time: run.time ?? '--:--',
+        createdAt: run.createdAt,
+      })),
+      pagination: {
+        limit: result.limit,
+        offset: result.offset,
+        total: result.total,
+      },
+    },
+  };
+}
+
 export function presentActionResult(result) {
   if (!result.ok) {
     return {

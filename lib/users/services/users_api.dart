@@ -1,123 +1,111 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/user_payload.dart';
 import '../models/user_record.dart';
 
 class UsersApi {
-  const UsersApi({http.Client? client}) : _client = client;
+  const UsersApi();
 
-  final http.Client? _client;
+  static const _usersKey = 'appmax.local_users.v1';
 
-  Future<List<UserRecord>> listUsers({
-    required String backendBaseUrl,
-    required String token,
-    required String search,
-  }) async {
-    final client = _client ?? http.Client();
+  Future<List<UserRecord>> listUsers({required String search}) async {
+    final users = await _loadUsers();
+    final query = search.trim().toLowerCase();
 
-    try {
-      final endpoint = Uri.parse(
-        '${backendBaseUrl.trim()}/auth/users',
-      ).replace(queryParameters: search.isEmpty ? null : {'search': search});
-      final response = await client.get(endpoint, headers: _headers(token));
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (query.isEmpty) return users;
 
-      _throwIfError(response.statusCode, data);
-
-      return (data['users'] as List<dynamic>)
-          .cast<Map<String, dynamic>>()
-          .map(UserRecord.fromJson)
-          .toList();
-    } finally {
-      if (_client == null) client.close();
-    }
+    return users
+        .where(
+          (user) =>
+              user.name.toLowerCase().contains(query) ||
+              user.email.toLowerCase().contains(query) ||
+              user.role.toLowerCase().contains(query),
+        )
+        .toList();
   }
 
-  Future<UserRecord> createUser({
-    required String backendBaseUrl,
-    required String token,
-    required UserPayload payload,
-  }) {
-    return _saveUser(
-      method: 'POST',
-      endpoint: '${backendBaseUrl.trim()}/auth/users',
-      token: token,
-      payload: payload,
-      editing: false,
-    );
+  Future<UserRecord> createUser({required UserPayload payload}) async {
+    final users = await _loadUsers();
+    final nextId = users.isEmpty
+        ? 1
+        : users.map((user) => user.id).reduce((a, b) => a > b ? a : b) + 1;
+    final user = _fromPayload(nextId, payload);
+
+    users.add(user);
+    await _saveUsers(users);
+
+    return user;
   }
 
   Future<UserRecord> updateUser({
-    required String backendBaseUrl,
-    required String token,
     required int id,
     required UserPayload payload,
-  }) {
-    return _saveUser(
-      method: 'PATCH',
-      endpoint: '${backendBaseUrl.trim()}/auth/users/$id',
-      token: token,
-      payload: payload,
-      editing: true,
+  }) async {
+    final users = await _loadUsers();
+    final index = users.indexWhere((user) => user.id == id);
+
+    if (index == -1) {
+      throw Exception('Usuario nao encontrado.');
+    }
+
+    final user = _fromPayload(id, payload);
+    users[index] = user;
+    await _saveUsers(users);
+
+    return user;
+  }
+
+  Future<void> deleteUser({required int id}) async {
+    final users = await _loadUsers()
+      ..removeWhere((user) => user.id == id);
+
+    await _saveUsers(users);
+  }
+
+  Future<List<UserRecord>> _loadUsers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_usersKey);
+
+    if (raw == null || raw.trim().isEmpty) return const [];
+
+    return (jsonDecode(raw) as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .map(UserRecord.fromJson)
+        .toList();
+  }
+
+  Future<void> _saveUsers(List<UserRecord> users) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_usersKey, jsonEncode(users.map(_toJson).toList()));
+  }
+
+  UserRecord _fromPayload(int id, UserPayload payload) {
+    final permissionLevel = switch (payload.role) {
+      'admin' => 100,
+      'operator' => 50,
+      _ => 10,
+    };
+
+    return UserRecord(
+      id: id,
+      name: payload.name,
+      email: payload.email,
+      role: payload.role,
+      permissionLevel: permissionLevel,
+      active: payload.active,
     );
   }
 
-  Future<void> deleteUser({
-    required String backendBaseUrl,
-    required String token,
-    required int id,
-  }) async {
-    final client = _client ?? http.Client();
-
-    try {
-      final response = await client.delete(
-        Uri.parse('${backendBaseUrl.trim()}/auth/users/$id'),
-        headers: _headers(token),
-      );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      _throwIfError(response.statusCode, data);
-    } finally {
-      if (_client == null) client.close();
-    }
-  }
-
-  Future<UserRecord> _saveUser({
-    required String method,
-    required String endpoint,
-    required String token,
-    required UserPayload payload,
-    required bool editing,
-  }) async {
-    final client = _client ?? http.Client();
-
-    try {
-      final request = http.Request(method, Uri.parse(endpoint))
-        ..headers.addAll(_headers(token))
-        ..body = jsonEncode(payload.toJson(editing: editing));
-      final streamed = await client.send(request);
-      final response = await http.Response.fromStream(streamed);
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-      _throwIfError(response.statusCode, data);
-
-      return UserRecord.fromJson(data['user'] as Map<String, dynamic>);
-    } finally {
-      if (_client == null) client.close();
-    }
-  }
-
-  Map<String, String> _headers(String token) {
+  Map<String, dynamic> _toJson(UserRecord user) {
     return {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
+      'id': user.id,
+      'name': user.name,
+      'email': user.email,
+      'role': user.role,
+      'permissionLevel': user.permissionLevel,
+      'active': user.active,
     };
-  }
-
-  void _throwIfError(int statusCode, Map<String, dynamic> data) {
-    if (statusCode < 200 || statusCode >= 300) {
-      throw Exception(data['error'] ?? 'Falha ao processar usuario.');
-    }
   }
 }

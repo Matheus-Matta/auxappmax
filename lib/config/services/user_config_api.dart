@@ -1,113 +1,37 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/user_config.dart';
 
 class UserConfigApi {
-  const UserConfigApi({http.Client? client}) : _client = client;
+  const UserConfigApi({FlutterSecureStorage? storage})
+    : _storage = storage ?? const FlutterSecureStorage();
 
-  final http.Client? _client;
+  static const _configKey = 'appmax.user_config.v1';
 
-  Future<UserConfig> getMyConfig({
-    required String backendBaseUrl,
-    required String token,
-  }) {
-    return _getConfig(
-      endpoint: '${backendBaseUrl.trim()}/auth/me/config',
-      token: token,
-    );
-  }
+  final FlutterSecureStorage _storage;
 
-  Future<UserConfig> saveMyConfig({
-    required String backendBaseUrl,
-    required String token,
-    required UserConfig config,
-  }) {
-    return _saveConfig(
-      endpoint: '${backendBaseUrl.trim()}/auth/me/config',
-      token: token,
-      config: config,
-    );
-  }
+  Future<UserConfig> getMyConfig() async {
+    final raw = await _storage.read(key: _configKey);
 
-  Future<UserConfig> getUserConfig({
-    required String backendBaseUrl,
-    required String token,
-    required int userId,
-  }) {
-    return _getConfig(
-      endpoint: '${backendBaseUrl.trim()}/auth/users/$userId/config',
-      token: token,
-    );
-  }
-
-  Future<UserConfig> saveUserConfig({
-    required String backendBaseUrl,
-    required String token,
-    required UserConfig config,
-  }) {
-    return _saveConfig(
-      endpoint: '${backendBaseUrl.trim()}/auth/users/${config.userId}/config',
-      token: token,
-      config: config,
-    );
-  }
-
-  Future<UserConfig> _getConfig({
-    required String endpoint,
-    required String token,
-  }) async {
-    final client = _client ?? http.Client();
-
-    try {
-      final response = await client.get(
-        Uri.parse(endpoint),
-        headers: _headers(token),
-      );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-      _throwIfError(response.statusCode, data);
-
-      return UserConfig.fromJson(data['config'] as Map<String, dynamic>);
-    } finally {
-      if (_client == null) client.close();
+    if (raw == null || raw.trim().isEmpty) {
+      return UserConfig.empty();
     }
+
+    return UserConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
   }
 
-  Future<UserConfig> _saveConfig({
-    required String endpoint,
-    required String token,
-    required UserConfig config,
-  }) async {
-    final client = _client ?? http.Client();
-
-    try {
-      final response = await client.put(
-        Uri.parse(endpoint),
-        headers: _headers(token),
-        body: jsonEncode(config.toJson()),
-      );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-      _throwIfError(response.statusCode, data);
-
-      return UserConfig.fromJson(data['config'] as Map<String, dynamic>);
-    } finally {
-      if (_client == null) client.close();
-    }
+  Future<UserConfig> saveMyConfig({required UserConfig config}) async {
+    await _storage.write(key: _configKey, value: jsonEncode(config.toJson()));
+    return config;
   }
 
-  Map<String, String> _headers(String token) {
-    return {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
+  Future<UserConfig> getUserConfig({required int userId}) {
+    return getMyConfig();
   }
 
-  void _throwIfError(int statusCode, Map<String, dynamic> data) {
-    if (statusCode < 200 || statusCode >= 300) {
-      throw Exception(data['error'] ?? 'Falha ao processar configuracao.');
-    }
+  Future<UserConfig> saveUserConfig({required UserConfig config}) {
+    return saveMyConfig(config: config);
   }
 }

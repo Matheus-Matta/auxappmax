@@ -7,12 +7,13 @@ import '../../ui/app_theme.dart';
 import '../../users/models/user_record.dart';
 import '../../users/views/user_form_page.dart';
 import '../../users/views/users_page.dart';
+import '../models/execution_report.dart';
 import '../models/home_action.dart';
 import '../models/home_activity.dart';
 import '../models/home_dashboard.dart';
 import '../models/home_metric.dart';
+import '../presenters/execution_reports_presenter.dart';
 import '../presenters/home_presenter.dart';
-import '../services/home_api.dart';
 
 enum _ShellPage {
   dashboard,
@@ -47,7 +48,7 @@ class _HomePageState extends State<HomePage> implements HomeView {
   final List<HomeActivity> _activities = const [
     HomeActivity(
       time: '--:--',
-      title: 'Aguardando dados reais do backend',
+      title: 'Aguardando execucoes locais',
       status: 'Info',
     ),
   ].toList();
@@ -55,7 +56,7 @@ class _HomePageState extends State<HomePage> implements HomeView {
   @override
   void initState() {
     super.initState();
-    _presenter = HomePresenter(homeApi: const HomeApi());
+    _presenter = HomePresenter();
     _presenter.attach(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadDashboard());
   }
@@ -136,33 +137,11 @@ class _HomePageState extends State<HomePage> implements HomeView {
   }
 
   Future<void> _execute(HomeAction action) {
-    final session = AuthScope.of(context);
-    final token = session.token;
-
-    if (token == null) {
-      return session.signOut().then((_) {
-        if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed(AppRoutes.login);
-      });
-    }
-
-    return _presenter.execute(
-      action: action,
-      backendBaseUrl: session.backendBaseUrl,
-      token: token,
-    );
+    return _presenter.execute(action: action);
   }
 
   Future<void> _loadDashboard() {
-    final session = AuthScope.of(context);
-    final token = session.token;
-
-    if (token == null) return Future.value();
-
-    return _presenter.loadDashboard(
-      backendBaseUrl: session.backendBaseUrl,
-      token: token,
-    );
+    return _presenter.loadDashboard();
   }
 
   void _showDashboard() {
@@ -353,7 +332,7 @@ class _ShellContent extends StatelessWidget {
         onCancel: onUserFormCancel,
         onSaved: onUserFormSaved,
       ),
-      _ShellPage.reports => _ReportsPanel(activities: activities),
+      _ShellPage.reports => const _ReportsPanel(),
       _ShellPage.config => const UserConfigPanel(),
     };
 
@@ -480,7 +459,7 @@ class _IntegrationsPanel extends StatelessWidget {
     ),
     _IntegrationItem(
       title: 'Backend local',
-      subtitle: 'API Node para automacao e scraping',
+      subtitle: 'API Node para usuarios, configs e dados',
       status: 'Ativo',
       icon: Icons.dns_outlined,
     ),
@@ -492,7 +471,7 @@ class _IntegrationsPanel extends StatelessWidget {
     ),
     _IntegrationItem(
       title: 'Playwright',
-      subtitle: 'Navegador controlado pelo backend',
+      subtitle: 'Navegador executado no cliente Windows',
       status: 'Pronto',
       icon: Icons.public_outlined,
     ),
@@ -536,13 +515,90 @@ class _IntegrationsPanel extends StatelessWidget {
   }
 }
 
-class _ReportsPanel extends StatelessWidget {
-  const _ReportsPanel({required this.activities});
+class _ReportsPanel extends StatefulWidget {
+  const _ReportsPanel();
 
-  final List<HomeActivity> activities;
+  @override
+  State<_ReportsPanel> createState() => _ReportsPanelState();
+}
+
+class _ReportsPanelState extends State<_ReportsPanel>
+    implements ExecutionReportsView {
+  static const _pageSize = 20;
+
+  late final ExecutionReportsPresenter _presenter;
+
+  List<ExecutionReport> _runs = const [];
+  bool _loading = true;
+  int _offset = 0;
+  int _total = 0;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _presenter = ExecutionReportsPresenter();
+    _presenter.attach(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadReports());
+  }
+
+  @override
+  void dispose() {
+    _presenter.detach();
+    super.dispose();
+  }
+
+  @override
+  void setReportsLoading(bool value) {
+    if (!mounted) return;
+
+    setState(() => _loading = value);
+  }
+
+  @override
+  void showReportsLoaded(ExecutionReportPage page) {
+    if (!mounted) return;
+
+    setState(() {
+      _runs = page.runs;
+      _offset = page.offset;
+      _total = page.total;
+    });
+  }
+
+  @override
+  void showReportsError(Object error) {
+    if (!mounted) return;
+
+    setState(() {
+      _error = error.toString().replaceFirst('Exception: ', '');
+    });
+  }
+
+  Future<void> _loadReports({int? offset}) async {
+    setState(() {
+      _error = null;
+    });
+
+    return _presenter.loadReports(limit: _pageSize, offset: offset ?? _offset);
+  }
+
+  void _previousPage() {
+    final nextOffset = (_offset - _pageSize).clamp(0, _total);
+    _loadReports(offset: nextOffset);
+  }
+
+  void _nextPage() {
+    final nextOffset = _offset + _pageSize;
+    if (nextOffset >= _total) return;
+    _loadReports(offset: nextOffset);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final start = _total == 0 ? 0 : _offset + 1;
+    final end = (_offset + _runs.length).clamp(0, _total);
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -553,39 +609,165 @@ class _ReportsPanel extends StatelessWidget {
             subtitle: 'Arquivos operacionais e historico recente.',
           ),
           const SizedBox(height: 18),
-          Wrap(
-            spacing: 14,
-            runSpacing: 14,
-            children: const [
-              _ReportCard(
-                title: 'Relatorio mensal',
-                subtitle: 'Consolidado de jobs e automacoes',
-                action: 'Gerar PDF',
-                icon: Icons.picture_as_pdf_outlined,
+          _Panel(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Resultados das execucoes',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Atualizar',
+                        onPressed: _loading ? null : () => _loadReports(),
+                        icon: const Icon(Icons.refresh, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_loading)
+                    const SizedBox(
+                      height: 92,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_error != null)
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    )
+                  else if (_runs.isEmpty)
+                    const SizedBox(
+                      height: 92,
+                      child: Center(
+                        child: Text(
+                          'Nenhuma execucao registrada.',
+                          style: TextStyle(color: AppTheme.muted),
+                        ),
+                      ),
+                    )
+                  else
+                    Column(
+                      children: [
+                        for (final run in _runs) _ExecutionReportRow(run: run),
+                      ],
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        'Mostrando $start-$end de $_total',
+                        style: const TextStyle(
+                          color: AppTheme.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Pagina anterior',
+                        onPressed: _loading || _offset == 0
+                            ? null
+                            : _previousPage,
+                        icon: const Icon(Icons.chevron_left, size: 20),
+                      ),
+                      IconButton(
+                        tooltip: 'Proxima pagina',
+                        onPressed: _loading || _offset + _runs.length >= _total
+                            ? null
+                            : _nextPage,
+                        icon: const Icon(Icons.chevron_right, size: 20),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              _ReportCard(
-                title: 'Historico de execucao',
-                subtitle: 'Ultimas rotinas processadas',
-                action: 'Exportar CSV',
-                icon: Icons.table_view_outlined,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExecutionReportRow extends StatelessWidget {
+  const _ExecutionReportRow({required this.run});
+
+  final ExecutionReport run;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = run.success ? AppTheme.cyan : Colors.redAccent;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppTheme.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 54,
+                child: Text(
+                  run.time,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
               ),
-              _ReportCard(
-                title: 'Auditoria',
-                subtitle: 'Eventos de usuarios e permissoes',
-                action: 'Baixar',
-                icon: Icons.verified_user_outlined,
+              Expanded(
+                child: Text(
+                  run.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.bg,
+                  border: Border.all(color: statusColor),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  run.status,
+                  style: TextStyle(color: statusColor, fontSize: 12),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 28),
-          Text(
-            'Atividade recente',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 14),
-          _ActivityList(activities: activities),
+          if (run.message.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              run.message,
+              style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+            ),
+          ],
+          if (run.resultPreview != '-') ...[
+            const SizedBox(height: 8),
+            SelectableText(
+              run.resultPreview,
+              style: const TextStyle(
+                color: AppTheme.muted,
+                fontSize: 12,
+                fontFamily: 'Consolas',
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -678,60 +860,6 @@ class _IntegrationCard extends StatelessWidget {
               style: const TextStyle(color: AppTheme.muted, fontSize: 13),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ReportCard extends StatelessWidget {
-  const _ReportCard({
-    required this.action,
-    required this.icon,
-    required this.subtitle,
-    required this.title,
-  });
-
-  final String action;
-  final IconData icon;
-  final String subtitle;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 270,
-      height: 158,
-      child: _Panel(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: AppTheme.cyan, size: 19),
-              const Spacer(),
-              Text(
-                title,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                subtitle,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 13),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: AppTheme.controlHeight,
-                child: OutlinedButton(onPressed: () {}, child: Text(action)),
-              ),
-            ],
-          ),
         ),
       ),
     );

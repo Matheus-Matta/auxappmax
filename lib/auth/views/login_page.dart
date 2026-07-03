@@ -16,9 +16,8 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> implements LoginView {
-  final _backendController = TextEditingController();
-  final _emailController = TextEditingController(text: 'admin@appmax.local');
-  final _passwordController = TextEditingController(text: 'admin123456');
+  final _userController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   late final LoginPresenter _presenter;
@@ -35,20 +34,9 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final session = AuthScope.of(context);
-
-    if (_backendController.text.isEmpty) {
-      _backendController.text = session.backendBaseUrl;
-    }
-  }
-
-  @override
   void dispose() {
     _presenter.detach();
-    _backendController.dispose();
-    _emailController.dispose();
+    _userController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -67,16 +55,12 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
   void showLoginSuccess(LoginResult result) {
     if (!mounted) return;
 
-    AuthScope.of(context)
-        .signIn(
-          backendBaseUrl: _backendController.text,
-          token: result.token,
-          user: result.user,
-        )
-        .then((_) {
-          if (!mounted) return;
-          Navigator.of(context).pushReplacementNamed(AppRoutes.home);
-        });
+    AuthScope.of(context).signIn(user: result.user).then((
+      _,
+    ) {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+    });
   }
 
   @override
@@ -94,9 +78,8 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
     }
 
     return _presenter.login(
-      backendBaseUrl: _backendController.text.trim(),
       request: LoginRequest(
-        email: _emailController.text.trim(),
+        username: _userController.text.trim(),
         password: _passwordController.text,
       ),
     );
@@ -128,8 +111,7 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
                         constraints: const BoxConstraints(maxWidth: 430),
                         child: _LoginForm(
                           formKey: _formKey,
-                          backendController: _backendController,
-                          emailController: _emailController,
+                          userController: _userController,
                           passwordController: _passwordController,
                           loading: _loading,
                           obscurePassword: _obscurePassword,
@@ -174,8 +156,7 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
                     constraints: const BoxConstraints(maxWidth: 390),
                     child: _LoginForm(
                       formKey: _formKey,
-                      backendController: _backendController,
-                      emailController: _emailController,
+                      userController: _userController,
                       passwordController: _passwordController,
                       loading: _loading,
                       obscurePassword: _obscurePassword,
@@ -198,8 +179,7 @@ class _LoginPageState extends State<LoginPage> implements LoginView {
 class _LoginForm extends StatelessWidget {
   const _LoginForm({
     required this.formKey,
-    required this.backendController,
-    required this.emailController,
+    required this.userController,
     required this.passwordController,
     required this.loading,
     required this.obscurePassword,
@@ -209,8 +189,7 @@ class _LoginForm extends StatelessWidget {
   });
 
   final GlobalKey<FormState> formKey;
-  final TextEditingController backendController;
-  final TextEditingController emailController;
+  final TextEditingController userController;
   final TextEditingController passwordController;
   final bool loading;
   final bool obscurePassword;
@@ -247,42 +226,22 @@ class _LoginForm extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Entre com suas credenciais corporativas.',
+            'Entre com suas credenciais FDC.',
             style: TextStyle(color: AppTheme.muted),
           ),
           const SizedBox(height: 34),
           TextFormField(
-            controller: backendController,
+            controller: userController,
             style: const TextStyle(fontSize: 13),
             decoration: const InputDecoration(
-              labelText: 'Backend',
-              prefixIcon: Icon(Icons.dns_outlined),
-            ),
-            validator: (value) {
-              final text = value?.trim() ?? '';
-              final uri = Uri.tryParse(text);
-
-              if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-                return 'Informe a URL do backend.';
-              }
-
-              return null;
-            },
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: emailController,
-            style: const TextStyle(fontSize: 13),
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Usuario',
+              labelText: 'Usuario FDC',
               prefixIcon: Icon(Icons.person_outline),
             ),
             validator: (value) {
               final text = value?.trim() ?? '';
 
-              if (!text.contains('@')) {
-                return 'Informe um email valido.';
+              if (text.isEmpty) {
+                return 'Informe o usuario FDC.';
               }
 
               return null;
@@ -305,8 +264,8 @@ class _LoginForm extends StatelessWidget {
               ),
             ),
             validator: (value) {
-              if ((value ?? '').length < 8) {
-                return 'A senha deve ter pelo menos 8 caracteres.';
+              if ((value ?? '').isEmpty) {
+                return 'Informe a senha FDC.';
               }
 
               return null;
@@ -355,12 +314,6 @@ class _LoginForm extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Text('Entrar'),
-          ),
-          const SizedBox(height: 16),
-          const Divider(color: AppTheme.border),
-          TextButton(
-            onPressed: loading ? null : () {},
-            child: const Text('Continuar com SSO corporativo ->'),
           ),
         ],
       ),

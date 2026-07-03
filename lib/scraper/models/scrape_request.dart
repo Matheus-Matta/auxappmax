@@ -5,6 +5,7 @@ class ScrapeRequest {
     required this.extractSelector,
     required this.waitForSelector,
     required this.headless,
+    required this.timeoutMs,
   });
 
   final String url;
@@ -12,6 +13,7 @@ class ScrapeRequest {
   final String extractSelector;
   final String waitForSelector;
   final bool headless;
+  final int timeoutMs;
 
   Map<String, dynamic> toJson() {
     return {
@@ -20,6 +22,7 @@ class ScrapeRequest {
       'extractSelector': extractSelector,
       'waitForSelector': waitForSelector,
       'headless': headless,
+      'timeoutMs': timeoutMs,
     };
   }
 }

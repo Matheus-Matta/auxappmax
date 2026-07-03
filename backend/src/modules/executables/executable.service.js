@@ -3,16 +3,7 @@ import { defaultExecutableActions } from './executable.model.js';
 export function createExecutableService({ automation, repository }) {
   return {
     async seedDefaultActions() {
-      const existing = await repository.listActions();
-      const existingKeys = new Set(existing.map((action) => action.key));
-
-      for (const action of defaultExecutableActions.filter(
-        (action) => !existingKeys.has(action.key),
-      )) {
-        await repository.upsertAction(action);
-      }
-
-      return repository.listActions();
+      return repository.replaceActions(defaultExecutableActions);
     },
     async getDashboard() {
       const [snapshot, actions] = await Promise.all([
@@ -30,6 +21,16 @@ export function createExecutableService({ automation, repository }) {
     },
     async listActions() {
       return repository.listActions();
+    },
+    async listRuns({ limit = 20, offset = 0 } = {}) {
+      const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+      const normalizedOffset = Math.max(Number(offset) || 0, 0);
+      const result = await repository.listRuns({
+        limit: normalizedLimit,
+        offset: normalizedOffset,
+      });
+
+      return { ok: true, ...result, limit: normalizedLimit, offset: normalizedOffset };
     },
     async saveAction(input) {
       const action = await repository.upsertAction(input);
@@ -80,6 +81,29 @@ export function createExecutableService({ automation, repository }) {
           run,
         };
       }
+    },
+    async recordClientRun(key, input) {
+      const action = await repository.findActionByKey(key);
+
+      if (!action) {
+        return { ok: false, status: 404, error: 'Executavel nao encontrado.' };
+      }
+
+      const run = await repository.insertRun({
+        key: action.key,
+        title: action.title,
+        success: input.success,
+        message: input.message,
+        resultJson: JSON.stringify(input.result ?? {}),
+      });
+
+      return {
+        ok: true,
+        action,
+        run,
+        message: input.message,
+        result: input.result,
+      };
     },
   };
 }

@@ -6,6 +6,9 @@ export function createExecutableRepository({ database }) {
     listActions() {
       return database.listExecutableActions();
     },
+    listRuns(pagination) {
+      return database.listExecutableRuns(pagination);
+    },
     findActionByKey(key) {
       return database.findExecutableActionByKey(key);
     },
@@ -14,6 +17,9 @@ export function createExecutableRepository({ database }) {
     },
     upsertAction(action) {
       return database.upsertExecutableAction(action);
+    },
+    replaceActions(actions) {
+      return database.replaceExecutableActions(actions);
     },
     insertRun(run) {
       return database.insertExecutableRun(run);

@@ -23,16 +23,12 @@ class LoginPresenter {
   }
 
   Future<void> login({
-    required String backendBaseUrl,
     required LoginRequest request,
   }) async {
     _view?.setLoading(true);
 
     try {
-      final result = await _api.login(
-        backendBaseUrl: backendBaseUrl,
-        request: request,
-      );
+      final result = await _api.login(request: request);
       _view?.showLoginSuccess(result);
     } catch (error) {
       _view?.showLoginError(error);

@@ -44,6 +44,10 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
           user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
           fdc_user TEXT NOT NULL DEFAULT '',
           fdc_pass TEXT NOT NULL DEFAULT '',
+          automation_framework TEXT NOT NULL DEFAULT 'playwright',
+          browser_mode TEXT NOT NULL DEFAULT 'visible',
+          browser_engine TEXT NOT NULL DEFAULT 'chromium',
+          action_timeout_ms INTEGER NOT NULL DEFAULT 30000,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
@@ -66,8 +70,20 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
           title TEXT NOT NULL,
           success BOOLEAN NOT NULL,
           message TEXT,
+          result_json JSONB,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+      `);
+      await pool.query(`
+        ALTER TABLE user_configs
+          ADD COLUMN IF NOT EXISTS automation_framework TEXT NOT NULL DEFAULT 'playwright',
+          ADD COLUMN IF NOT EXISTS browser_mode TEXT NOT NULL DEFAULT 'visible',
+          ADD COLUMN IF NOT EXISTS browser_engine TEXT NOT NULL DEFAULT 'chromium',
+          ADD COLUMN IF NOT EXISTS action_timeout_ms INTEGER NOT NULL DEFAULT 30000;
+      `);
+      await pool.query(`
+        ALTER TABLE executable_runs
+          ADD COLUMN IF NOT EXISTS result_json JSONB;
       `);
     },
     async health() {
@@ -322,6 +338,47 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
 
       return result.rows[0];
     },
+    async replaceExecutableActions(actions) {
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM executable_actions');
+
+        for (const action of actions) {
+          await client.query(
+            `
+              INSERT INTO executable_actions (
+                action_key,
+                title,
+                subtitle,
+                badge,
+                icon,
+                enabled
+              )
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `,
+            [
+              action.key,
+              action.title,
+              action.subtitle,
+              action.badge,
+              action.icon,
+              action.enabled,
+            ],
+          );
+        }
+
+        await client.query('COMMIT');
+
+        return this.listExecutableActions();
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async insertExecutableRun(run) {
       const result = await pool.query(
         `
@@ -329,15 +386,43 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
             action_key,
             title,
             success,
-            message
+            message,
+            result_json
           )
-          VALUES ($1, $2, $3, $4)
+          VALUES ($1, $2, $3, $4, $5)
           RETURNING id
         `,
-        [run.key, run.title, run.success, run.message ?? null],
+        [run.key, run.title, run.success, run.message ?? null, run.resultJson ?? null],
       );
 
       return { id: Number(result.rows[0].id) };
+    },
+    async listExecutableRuns({ limit, offset }) {
+      const [total, runs] = await Promise.all([
+        pool.query('SELECT COUNT(*)::INT AS total FROM executable_runs'),
+        pool.query(
+          `
+            SELECT
+              id,
+              action_key AS "key",
+              title,
+              success,
+              message,
+              result_json AS "result",
+              created_at AS "createdAt",
+              TO_CHAR(created_at, 'HH24:MI') AS time
+            FROM executable_runs
+            ORDER BY created_at DESC, id DESC
+            LIMIT $1 OFFSET $2
+          `,
+          [limit, offset],
+        ),
+      ]);
+
+      return {
+        total: Number(total.rows[0]?.total ?? 0),
+        runs: runs.rows,
+      };
     },
     async getDashboardSnapshot() {
       const [executableStats, scrapeStats, actions, users, activities] =
@@ -413,6 +498,10 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
             user_id AS "userId",
             fdc_user AS "fdcUser",
             fdc_pass AS "fdcPass",
+            automation_framework AS "automationFramework",
+            browser_mode AS "browserMode",
+            browser_engine AS "browserEngine",
+            action_timeout_ms AS "actionTimeoutMs",
             created_at AS "createdAt",
             updated_at AS "updatedAt"
           FROM user_configs
@@ -426,21 +515,45 @@ export function createPostgresDatabase({ postgresUrl, postgresSsl }) {
     async upsertUserConfig(userId, config) {
       const result = await pool.query(
         `
-          INSERT INTO user_configs (user_id, fdc_user, fdc_pass)
-          VALUES ($1, $2, $3)
+          INSERT INTO user_configs (
+            user_id,
+            fdc_user,
+            fdc_pass,
+            automation_framework,
+            browser_mode,
+            browser_engine,
+            action_timeout_ms
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
           ON CONFLICT (user_id) DO UPDATE SET
             fdc_user = EXCLUDED.fdc_user,
             fdc_pass = EXCLUDED.fdc_pass,
+            automation_framework = EXCLUDED.automation_framework,
+            browser_mode = EXCLUDED.browser_mode,
+            browser_engine = EXCLUDED.browser_engine,
+            action_timeout_ms = EXCLUDED.action_timeout_ms,
             updated_at = NOW()
           RETURNING
             id,
             user_id AS "userId",
             fdc_user AS "fdcUser",
             fdc_pass AS "fdcPass",
+            automation_framework AS "automationFramework",
+            browser_mode AS "browserMode",
+            browser_engine AS "browserEngine",
+            action_timeout_ms AS "actionTimeoutMs",
             created_at AS "createdAt",
             updated_at AS "updatedAt"
         `,
-        [userId, config.fdcUser, config.fdcPass],
+        [
+          userId,
+          config.fdcUser,
+          config.fdcPass,
+          config.automationFramework,
+          config.browserMode,
+          config.browserEngine,
+          config.actionTimeoutMs,
+        ],
       );
 
       return result.rows[0];

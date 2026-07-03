@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../auth/services/auth_session.dart';
 import '../../ui/app_theme.dart';
 import '../models/user_payload.dart';
 import '../models/user_record.dart';
@@ -76,10 +75,6 @@ class _UserFormPanelState extends State<UserFormPanel> {
   Future<void> _save() async {
     if (_formKey.currentState?.validate() != true) return;
 
-    final session = AuthScope.of(context);
-    final token = session.token;
-    if (token == null) return;
-
     setState(() {
       _loading = true;
       _error = null;
@@ -96,17 +91,11 @@ class _UserFormPanelState extends State<UserFormPanel> {
     try {
       if (_editing) {
         await _api.updateUser(
-          backendBaseUrl: session.backendBaseUrl,
-          token: token,
           id: widget.user!.id,
           payload: payload,
         );
       } else {
-        await _api.createUser(
-          backendBaseUrl: session.backendBaseUrl,
-          token: token,
-          payload: payload,
-        );
+        await _api.createUser(payload: payload);
       }
 
       if (!mounted) return;

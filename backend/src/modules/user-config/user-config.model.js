@@ -3,12 +3,20 @@ import { z } from 'zod';
 export const updateUserConfigSchema = z.object({
   fdcUser: z.string().trim().max(255).optional().default(''),
   fdcPass: z.string().max(255).optional().default(''),
+  automationFramework: z.enum(['playwright']).optional().default('playwright'),
+  browserMode: z.enum(['visible', 'background']).optional().default('visible'),
+  browserEngine: z.enum(['chromium']).optional().default('chromium'),
+  actionTimeoutMs: z.number().int().min(5000).max(120000).optional().default(30000),
 });
 
 export function normalizeUserConfigBody(body) {
   return {
     fdcUser: body.fdcUser ?? body.fdc_user,
     fdcPass: body.fdcPass ?? body.fdc_pass,
+    automationFramework: body.automationFramework ?? body.automation_framework,
+    browserMode: body.browserMode ?? body.browser_mode,
+    browserEngine: body.browserEngine ?? body.browser_engine,
+    actionTimeoutMs: body.actionTimeoutMs ?? body.action_timeout_ms,
   };
 }
 
@@ -18,6 +26,10 @@ export function createEmptyUserConfig(userId) {
     userId: Number(userId),
     fdcUser: '',
     fdcPass: '',
+    automationFramework: 'playwright',
+    browserMode: 'visible',
+    browserEngine: 'chromium',
+    actionTimeoutMs: 30000,
     createdAt: null,
     updatedAt: null,
   };
@@ -31,6 +43,10 @@ export function sanitizeUserConfig(config) {
     userId: Number(config.userId),
     fdcUser: config.fdcUser ?? '',
     fdcPass: config.fdcPass ?? '',
+    automationFramework: config.automationFramework ?? 'playwright',
+    browserMode: config.browserMode ?? 'visible',
+    browserEngine: config.browserEngine ?? 'chromium',
+    actionTimeoutMs: Number(config.actionTimeoutMs ?? 30000),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt,
   };

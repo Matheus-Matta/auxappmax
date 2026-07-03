@@ -26,6 +26,10 @@ export function createUserConfigService({ repository }) {
       const config = await repository.upsertUserConfig(userId, {
         fdcUser: input.fdcUser,
         fdcPass: input.fdcPass,
+        automationFramework: input.automationFramework,
+        browserMode: input.browserMode,
+        browserEngine: input.browserEngine,
+        actionTimeoutMs: input.actionTimeoutMs,
       });
 
       return { ok: true, config };

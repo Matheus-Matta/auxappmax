@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/app_routes.dart';
-import '../../auth/services/auth_session.dart';
 import '../../ui/app_theme.dart';
 import '../models/user_record.dart';
 import '../services/users_api.dart';
@@ -64,11 +63,6 @@ class _UsersPanelState extends State<UsersPanel> {
   }
 
   Future<void> _loadUsers() async {
-    final session = AuthScope.of(context);
-    final token = session.token;
-
-    if (token == null) return;
-
     setState(() {
       _loading = true;
       _error = null;
@@ -76,8 +70,6 @@ class _UsersPanelState extends State<UsersPanel> {
 
     try {
       final users = await _api.listUsers(
-        backendBaseUrl: session.backendBaseUrl,
-        token: token,
         search: _searchController.text.trim(),
       );
 
@@ -117,16 +109,8 @@ class _UsersPanelState extends State<UsersPanel> {
 
     if (confirm != true || !mounted) return;
 
-    final session = AuthScope.of(context);
-    final token = session.token;
-    if (token == null) return;
-
     try {
-      await _api.deleteUser(
-        backendBaseUrl: session.backendBaseUrl,
-        token: token,
-        id: user.id,
-      );
+      await _api.deleteUser(id: user.id);
       await _loadUsers();
     } catch (error) {
       if (!mounted) return;

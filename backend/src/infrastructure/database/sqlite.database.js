@@ -42,6 +42,10 @@ export function createSqliteDatabase({ sqliteFile }) {
           user_id INTEGER NOT NULL UNIQUE,
           fdc_user TEXT NOT NULL DEFAULT '',
           fdc_pass TEXT NOT NULL DEFAULT '',
+          automation_framework TEXT NOT NULL DEFAULT 'playwright',
+          browser_mode TEXT NOT NULL DEFAULT 'visible',
+          browser_engine TEXT NOT NULL DEFAULT 'chromium',
+          action_timeout_ms INTEGER NOT NULL DEFAULT 30000,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -65,9 +69,15 @@ export function createSqliteDatabase({ sqliteFile }) {
           title TEXT NOT NULL,
           success INTEGER NOT NULL,
           message TEXT,
+          result_json TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
       `);
+      ensureSqliteColumn(db, 'user_configs', 'automation_framework', "TEXT NOT NULL DEFAULT 'playwright'");
+      ensureSqliteColumn(db, 'user_configs', 'browser_mode', "TEXT NOT NULL DEFAULT 'visible'");
+      ensureSqliteColumn(db, 'user_configs', 'browser_engine', "TEXT NOT NULL DEFAULT 'chromium'");
+      ensureSqliteColumn(db, 'user_configs', 'action_timeout_ms', 'INTEGER NOT NULL DEFAULT 30000');
+      ensureSqliteColumn(db, 'executable_runs', 'result_json', 'TEXT');
     },
     async health() {
       db.prepare('SELECT 1 AS ok').get();
@@ -295,6 +305,43 @@ export function createSqliteDatabase({ sqliteFile }) {
 
       return this.findExecutableActionByKey(action.key);
     },
+    async replaceExecutableActions(actions) {
+      db.exec('BEGIN');
+
+      try {
+        db.prepare('DELETE FROM executable_actions').run();
+
+        for (const action of actions) {
+          db.prepare(
+            `
+              INSERT INTO executable_actions (
+                action_key,
+                title,
+                subtitle,
+                badge,
+                icon,
+                enabled
+              )
+              VALUES (?, ?, ?, ?, ?, ?)
+            `,
+          ).run(
+            action.key,
+            action.title,
+            action.subtitle,
+            action.badge,
+            action.icon,
+            action.enabled ? 1 : 0,
+          );
+        }
+
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+
+      return this.listExecutableActions();
+    },
     async insertExecutableRun(run) {
       const result = db
         .prepare(
@@ -303,14 +350,49 @@ export function createSqliteDatabase({ sqliteFile }) {
               action_key,
               title,
               success,
-              message
+              message,
+              result_json
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
           `,
         )
-        .run(run.key, run.title, run.success ? 1 : 0, run.message ?? null);
+        .run(
+          run.key,
+          run.title,
+          run.success ? 1 : 0,
+          run.message ?? null,
+          run.resultJson ?? null,
+        );
 
       return { id: Number(result.lastInsertRowid) };
+    },
+    async listExecutableRuns({ limit, offset }) {
+      const total = db
+        .prepare('SELECT COUNT(*) AS total FROM executable_runs')
+        .get();
+      const rows = db
+        .prepare(
+          `
+            SELECT
+              id,
+              action_key AS "key",
+              title,
+              success,
+              message,
+              result_json AS resultJson,
+              created_at AS createdAt,
+              strftime('%H:%M', created_at) AS time
+            FROM executable_runs
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+          `,
+        )
+        .all(limit, offset);
+
+      return {
+        total: Number(total.total ?? 0),
+        runs: rows.map(mapSqliteExecutableRun),
+      };
     },
     async getDashboardSnapshot() {
       const executableStats = db
@@ -394,6 +476,10 @@ export function createSqliteDatabase({ sqliteFile }) {
               user_id AS userId,
               fdc_user AS fdcUser,
               fdc_pass AS fdcPass,
+              automation_framework AS automationFramework,
+              browser_mode AS browserMode,
+              browser_engine AS browserEngine,
+              action_timeout_ms AS actionTimeoutMs,
               created_at AS createdAt,
               updated_at AS updatedAt
             FROM user_configs
@@ -407,14 +493,34 @@ export function createSqliteDatabase({ sqliteFile }) {
     async upsertUserConfig(userId, config) {
       db.prepare(
         `
-          INSERT INTO user_configs (user_id, fdc_user, fdc_pass)
-          VALUES (?, ?, ?)
+          INSERT INTO user_configs (
+            user_id,
+            fdc_user,
+            fdc_pass,
+            automation_framework,
+            browser_mode,
+            browser_engine,
+            action_timeout_ms
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(user_id) DO UPDATE SET
             fdc_user = excluded.fdc_user,
             fdc_pass = excluded.fdc_pass,
+            automation_framework = excluded.automation_framework,
+            browser_mode = excluded.browser_mode,
+            browser_engine = excluded.browser_engine,
+            action_timeout_ms = excluded.action_timeout_ms,
             updated_at = CURRENT_TIMESTAMP
         `,
-      ).run(userId, config.fdcUser, config.fdcPass);
+      ).run(
+        userId,
+        config.fdcUser,
+        config.fdcPass,
+        config.automationFramework,
+        config.browserMode,
+        config.browserEngine,
+        config.actionTimeoutMs,
+      );
 
       return this.findUserConfigByUserId(userId);
     },
@@ -422,6 +528,15 @@ export function createSqliteDatabase({ sqliteFile }) {
       db.close();
     },
   };
+}
+
+function ensureSqliteColumn(db, tableName, columnName, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const exists = columns.some((column) => column.name === columnName);
+
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`);
+  }
 }
 
 function mapSqliteUser(row) {
@@ -436,6 +551,24 @@ function mapSqliteExecutableAction(row) {
     ...row,
     enabled: row.enabled === 1,
   };
+}
+
+function mapSqliteExecutableRun(row) {
+  return {
+    ...row,
+    success: row.success === 1,
+    result: parseJson(row.resultJson),
+  };
+}
+
+function parseJson(value) {
+  if (!value) return {};
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
 }
 
 function buildDashboardSnapshot({
